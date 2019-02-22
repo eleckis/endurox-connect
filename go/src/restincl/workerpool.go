@@ -11,7 +11,7 @@
  * AGPL or Mavimax's license for commercial use.
  * -----------------------------------------------------------------------------
  * AGPL license:
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU Affero General Public License, version 3 as published
  * by the Free Software Foundation;
@@ -21,8 +21,8 @@
  * PARTICULAR PURPOSE. See the GNU Affero General Public License, version 3
  * for more details.
  *
- * You should have received a copy of the GNU Affero General Public License along 
- * with this program; if not, write to the Free Software Foundation, Inc., 
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
  * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  *
  * -----------------------------------------------------------------------------
@@ -484,16 +484,76 @@ func genRsp(ac *atmi.ATMICtx, buf atmi.TypedBuffer, svc *ServiceMap,
 		/*		if !svc.Asynccall && atmi.TPMINVAL == err.Code() { why?
 				Lets reply back with same incoming buffer...
 		*/
+
 		if !svc.Asynccall || svc.Asyncecho {
 			bufs, ok := buf.(*atmi.TypedJSON)
 
 			if !ok {
 				ac.TpLogError("Failed to cast buffer to TypedJSON")
 				err = atmi.NewCustomATMIError(atmi.TPEINVAL,
-					"Failed to cast buffer to ypedJSON")
+					"Failed to cast buffer to TypedJSON")
 			} else {
 				//Set the bytes to string we got
 				rsp = []byte(bufs.GetJSON())
+
+				if svc.Parseheaders {
+					var jsonObj interface{}
+					if errj := json.Unmarshal(rsp), &jsonObj); errj != nil {
+						ac.TpLogError("Failed to unmarshal JSON: %v", errj.Error())
+						err = atmi.NewCustomATMIError(atmi.TPEINVAL,
+							"Failed to unmarshal JSON: %v", errj.Error())
+					}
+					obj := jsonObj.(map[string]interface{})
+		
+					// Add header data to UBF fields
+					if svc.Parseheaders {
+						if svc.JsonHeaderField != "" {
+							header := obj[svc.JsonHeaderField]
+						} else {
+							header := obj["Header"]
+						}
+						
+						for k, v := range header {
+							http.Header.Add(k, v)
+						}
+
+						if svc.Parsecookies {
+							if svc.JsonCookieField != "" {
+								cookie := obj[svc.JsonCookieField]
+							} else {
+								cookie := obj["Cookie"]
+							}
+							
+							ck := http.Cookie{}
+							ck.Name = cookie["Name"]
+							ck.Value = cookie["Value"]
+							ck.Path = cookie["Path"]
+							ck.Domain = cookie["Domain"]
+							ck.Expires = time.Parse(time.RFC3339, cookie["RawExpires"])
+							ck.RawExpires = cookie["RawExpires"]
+							ck.MaxAge = cookie["MaxAge"]
+							ck.Secure = cookie["Secure"]
+							ck.HttpOnly = cookie["HttpOnly"]
+							//ck.SameSite = cookie["SameSite"]
+							ck.Raw = cookie["Raw"]
+
+							http.SetCookie(w, &ck)
+						}
+					}
+		
+					//Convert object to JSON
+					if barr, errj := json.Marshal(obj); errj == nil {
+						if err = rsp.SetJSON(barr); errj != nil {
+							ac.TpLogError("Failed to set JSON: %v", errj.Error())
+							err = atmi.NewCustomATMIError(atmi.TPEINVAL,
+								"Failed to set JSON: %v", errj.Error())
+						}
+					} else {
+						ac.TpLogError("Failed to marshal JSON: %v", errj.Error())
+						err = atmi.NewCustomATMIError(atmi.TPEINVAL,
+							"Failed to marshal JSON: %v", errj.Error())
+					}
+				}
 			}
 		}
 		break
@@ -734,7 +794,8 @@ func handleMessage(ac *atmi.ATMICtx, svc *ServiceMap, w http.ResponseWriter, req
 				return atmi.FAIL
 			}
 
-			if svc.Format == "r" || svc.Format == "regexp" {
+			if svc.Format == "r" || svc.Format == "regexp" || svc.Parseheaders {
+				//Convert JSON to map interface object
 				var jsonObj interface{}
 				if err := json.Unmarshal([]byte(bufj.GetJSON()), &jsonObj); err != nil {
 					ac.TpLogError("Failed to unmarshal JSON: %v", err.Error())
@@ -742,12 +803,32 @@ func handleMessage(ac *atmi.ATMICtx, svc *ServiceMap, w http.ResponseWriter, req
 				}
 				obj := jsonObj.(map[string]interface{})
 
-				if svc.UrlField != "" {
-					obj[svc.UrlField] = req.URL.Path
-				} else {
-					obj["EX_IF_URL"] = req.URL.Path
+				//Add URL to JSON
+				if svc.Format == "r" || svc.Format == "regexp" {
+					if svc.UrlField != "" {
+						obj[svc.UrlField] = req.URL.Path
+					} else {
+						obj["EX_IF_URL"] = req.URL.Path
+					}
 				}
 
+				// Add header data to UBF fields
+				if svc.Parseheaders {
+					if svc.JsonHeaderField != "" {
+						obj[svc.JsonHeaderField] = req.Header
+					} else {
+						obj["Header"] = req.Header
+					}
+					if svc.Parsecookies {
+						if svc.JsonCookieField != "" {
+							obj[svc.JsonCookieField] = req.Cookies()
+						} else {
+							obj["Cookie"] = req.Cookies()
+						}
+					}
+				}
+
+				//Convert object to JSON
 				if barr, err2 := json.Marshal(obj); err2 == nil {
 					if err = bufj.SetJSON(barr); err != nil {
 						ac.TpLogError("Failed to set JSON: %v", err.Error())
@@ -757,7 +838,6 @@ func handleMessage(ac *atmi.ATMICtx, svc *ServiceMap, w http.ResponseWriter, req
 					ac.TpLogError("Failed to marshal JSON: %v", err2.Error())
 					return atmi.FAIL
 				}
-
 			}
 
 			buf = bufj

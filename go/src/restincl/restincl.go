@@ -159,8 +159,10 @@ type ServiceMap struct {
 	UrlField string `json:"urlfield"` //Field for URL in case of CONV_JSON2UBF and CONV_JSON
 
 	// Parsing request headers/Cookies
-	Parseheaders bool `json:"parseheaders"` // Default false
-	Parsecookies bool `json:"parsecookies"` // Default false
+	Parseheaders    bool   `json:"parseheaders"`      // Default false
+	Parsecookies    bool   `json:"parsecookies"`      // Default false
+	JsonCookieField string `json:"json_cookie_field"` //Field for Cookie object in case of CONV_JSON
+	JsonHeaderField string `json:"json_header_field"` //Field for Headers in case of CONV_JSON
 }
 
 //Route information structure for Handles with Regexp path
