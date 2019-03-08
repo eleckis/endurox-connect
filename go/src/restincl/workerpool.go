@@ -495,63 +495,69 @@ func genRsp(ac *atmi.ATMICtx, buf atmi.TypedBuffer, svc *ServiceMap,
 			} else {
 				//Set the bytes to string we got
 				rsp = []byte(bufs.GetJSON())
+				var errj error
 
+				//If parsing headers is enabled, do that
 				if svc.Parseheaders {
+					//Convert JSON to map[string]interface{}
 					var jsonObj interface{}
-					if errj := json.Unmarshal(rsp), &jsonObj); errj != nil {
+					if errj := json.Unmarshal(rsp, &jsonObj); errj != nil {
 						ac.TpLogError("Failed to unmarshal JSON: %v", errj.Error())
 						err = atmi.NewCustomATMIError(atmi.TPEINVAL,
-							"Failed to unmarshal JSON: %v", errj.Error())
+							"Failed to unmarshal JSON")
 					}
 					obj := jsonObj.(map[string]interface{})
-		
-					// Add header data to UBF fields
-					if svc.Parseheaders {
-						if svc.JsonHeaderField != "" {
-							header := obj[svc.JsonHeaderField]
-						} else {
-							header := obj["Header"]
-						}
-						
-						for k, v := range header {
-							http.Header.Add(k, v)
-						}
 
-						if svc.Parsecookies {
-							if svc.JsonCookieField != "" {
-								cookie := obj[svc.JsonCookieField]
-							} else {
-								cookie := obj["Cookie"]
-							}
-							
-							ck := http.Cookie{}
-							ck.Name = cookie["Name"]
-							ck.Value = cookie["Value"]
-							ck.Path = cookie["Path"]
-							ck.Domain = cookie["Domain"]
-							ck.Expires = time.Parse(time.RFC3339, cookie["RawExpires"])
-							ck.RawExpires = cookie["RawExpires"]
-							ck.MaxAge = cookie["MaxAge"]
-							ck.Secure = cookie["Secure"]
-							ck.HttpOnly = cookie["HttpOnly"]
-							//ck.SameSite = cookie["SameSite"]
-							ck.Raw = cookie["Raw"]
-
-							http.SetCookie(w, &ck)
+					var header map[string]interface{}
+					if svc.JsonHeaderField != "" {
+						header = obj[svc.JsonHeaderField].(map[string]interface{})
+						delete(obj, svc.JsonHeaderField)
+					} else {
+						header = obj["Header"].(map[string]interface{})
+						delete(obj, "Header")
+					}
+					//Add headers to ResponseWriter
+					for k, v := range header {
+						for _, val := range v.([]interface{}) {
+							w.Header().Set(k, val.(string))
 						}
 					}
-		
-					//Convert object to JSON
-					if barr, errj := json.Marshal(obj); errj == nil {
-						if err = rsp.SetJSON(barr); errj != nil {
-							ac.TpLogError("Failed to set JSON: %v", errj.Error())
-							err = atmi.NewCustomATMIError(atmi.TPEINVAL,
-								"Failed to set JSON: %v", errj.Error())
+					//Parse Cookies if necessary
+					if svc.Parsecookies {
+						var cookie []interface{}
+						if svc.JsonCookieField != "" {
+							cookie = obj[svc.JsonCookieField].([]interface{})
+							delete(obj, svc.JsonCookieField)
+						} else {
+							cookie = obj["Cookie"].([]interface{})
+							delete(obj, "Cookie")
 						}
-					} else {
+						//Add Cookies to ResponseWriter
+						for _, val := range cookie {
+							c := val.(map[string]interface{})
+							ck := &http.Cookie{}
+							if c["Name"].(string) != "" {
+								ck.Name = c["Name"].(string)
+								ck.Value = c["Value"].(string)
+								ck.Path = c["Path"].(string)
+								ck.Domain = c["Domain"].(string)
+								ck.Expires, _ = time.Parse(time.RFC3339, c["RawExpires"].(string))
+								ck.RawExpires = c["RawExpires"].(string)
+								ck.MaxAge = int(c["MaxAge"].(float64))
+								ck.Secure = c["Secure"].(bool)
+								ck.HttpOnly = c["HttpOnly"].(bool)
+								//ck.SameSite = c["SameSite"].(SameSite)
+								ck.Raw = c["Raw"].(string)
+							}
+							http.SetCookie(w, ck)
+						}
+					}
+
+					//Convert map object back to JSON
+					if rsp, errj = json.Marshal(obj); errj != nil {
 						ac.TpLogError("Failed to marshal JSON: %v", errj.Error())
 						err = atmi.NewCustomATMIError(atmi.TPEINVAL,
-							"Failed to marshal JSON: %v", errj.Error())
+							"Failed to marshal JSON")
 					}
 				}
 			}
@@ -652,6 +658,8 @@ func genRsp(ac *atmi.ATMICtx, buf atmi.TypedBuffer, svc *ServiceMap,
 	ac.TpLogDump(atmi.LOG_DEBUG, "Sending response back", rsp, len(rsp))
 	w.Header().Set("Content-Length", strconv.Itoa(len(rsp)))
 	w.Header().Set("Content-Type", rspType)
+
+	ac.TpLogDebug("Response header: %v", w.Header())
 
 	w.Write(rsp)
 }
@@ -819,6 +827,7 @@ func handleMessage(ac *atmi.ATMICtx, svc *ServiceMap, w http.ResponseWriter, req
 					} else {
 						obj["Header"] = req.Header
 					}
+					//Add Cookies to JSON
 					if svc.Parsecookies {
 						if svc.JsonCookieField != "" {
 							obj[svc.JsonCookieField] = req.Cookies()

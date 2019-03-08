@@ -607,6 +607,21 @@ be used in case exact path is not found.
 Field to store URL path for *json* and *json2ubf* conversion methods in case regular
 expression format is used. Default value is 'EX_IF_URL'.
 
+*parseheaders* = 'PARSE_HEADERS'::
+Parse HTTP header fields and add them to UBF, in case of *json2ubf* conversion method,
+and to JSON message in case of *json*. Default value *false*.
+
+*parsecookies* = 'PARSE_COOKIES'::
+Parse HTTP Cookies and add them to UBF or JSON. Can be used only if *parseheaders* is
+enabled. Default value is *false*.
+
+*json_header_field* = 'JSON_HEADER_FIELD'::
+JSON object key where header fields should be stored. Default is "Headers".
+
+*json_cookie_field* = 'JSON_COOKIE_FIELD'::
+JSON object key where cookies should be stored if *parsecookies* is enabled. 
+Default is "Cookies".
+
 EXIT STATUS
 -----------
 *0*::
