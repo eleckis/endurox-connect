@@ -792,7 +792,7 @@ func handleMessage(ac *atmi.ATMICtx, svc *ServiceMap, w http.ResponseWriter, req
 			break
 		case CONV_JSON:
 			//Use request buffer as JSON
-
+			
 			bufj, err1 := ac.NewJSON(body)
 
 			if nil != err1 {
@@ -805,12 +805,13 @@ func handleMessage(ac *atmi.ATMICtx, svc *ServiceMap, w http.ResponseWriter, req
 			if svc.Format == "r" || svc.Format == "regexp" || svc.Parseheaders {
 				//Convert JSON to map interface object
 				var jsonObj interface{}
-				if err := json.Unmarshal([]byte(bufj.GetJSON()), &jsonObj); err != nil {
-					ac.TpLogError("Failed to unmarshal JSON: %v", err.Error())
-					return atmi.FAIL
-				}
+				decoder := json.NewDecoder(strings.NewReader(bufj.GetJSONText()))
+                decoder.UseNumber()
+                if err := decoder.Decode(&jsonObj); err != nil {
+                    ac.TpLog(atmi.LOG_ERROR, "Failed to decode JSON: %v", err.Error())
+                    return atmi.FAIL
+                }
 				obj := jsonObj.(map[string]interface{})
-
 				//Add URL to JSON
 				if svc.Format == "r" || svc.Format == "regexp" {
 					if svc.UrlField != "" {
